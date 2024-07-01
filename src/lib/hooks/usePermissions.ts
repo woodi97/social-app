@@ -1,6 +1,7 @@
-import {Camera} from 'expo-camera'
-import * as MediaLibrary from 'expo-media-library'
 import {Linking} from 'react-native'
+import {Camera} from 'expo-camera/legacy' // TODO: Migrate to the new one.
+import * as MediaLibrary from 'expo-media-library'
+
 import {isWeb} from 'platform/detection'
 import {Alert} from 'view/com/util/Alert'
 
@@ -19,7 +20,9 @@ const openPermissionAlert = (perm: string) => {
 }
 
 export function usePhotoLibraryPermission() {
-  const [res, requestPermission] = MediaLibrary.usePermissions()
+  const [res, requestPermission] = MediaLibrary.usePermissions({
+    granularPermissions: ['photo'],
+  })
   const requestPhotoAccessIfNeeded = async () => {
     // On the, we use <input type="file"> to produce a filepicker
     // This does not need any permission granting.

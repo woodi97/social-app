@@ -1,23 +1,24 @@
 import {
-  AppBskyEmbedImages,
   AppBskyEmbedExternal,
+  AppBskyEmbedImages,
   AppBskyEmbedRecord,
   AppBskyEmbedRecordWithMedia,
   AppBskyFeedThreadgate,
-  AppBskyRichtextFacet,
   BskyAgent,
   ComAtprotoLabelDefs,
   ComAtprotoRepoUploadBlob,
   RichText,
 } from '@atproto/api'
 import {AtUri} from '@atproto/api'
-import {isNetworkError} from 'lib/strings/errors'
-import {LinkMeta} from '../link-meta/link-meta'
-import {isWeb} from 'platform/detection'
-import {ImageModel} from 'state/models/media/image'
-import {shortenLinks} from 'lib/strings/rich-text-manip'
+
 import {logger} from '#/logger'
 import {ThreadgateSetting} from '#/state/queries/threadgate'
+import {isNetworkError} from 'lib/strings/errors'
+import {shortenLinks, stripInvalidMentions} from 'lib/strings/rich-text-manip'
+import {isNative, isWeb} from 'platform/detection'
+import {ImageModel} from 'state/models/media/image'
+import {LinkMeta} from '../link-meta/link-meta'
+import {safeDeleteAsync} from '../media/manip'
 
 export interface ExternalEmbedDraft {
   uri: string
@@ -79,17 +80,7 @@ export async function post(agent: BskyAgent, opts: PostOpts) {
   opts.onStateChange?.('Processing...')
   await rt.detectFacets(agent)
   rt = shortenLinks(rt)
-
-  // filter out any mention facets that didn't map to a user
-  rt.facets = rt.facets?.filter(facet => {
-    const mention = facet.features.find(feature =>
-      AppBskyRichtextFacet.isMention(feature),
-    )
-    if (mention && !mention.did) {
-      return false
-    }
-    return true
-  })
+  rt = stripInvalidMentions(rt)
 
   // add quote embed if present
   if (opts.quote) {
@@ -117,6 +108,9 @@ export async function post(agent: BskyAgent, opts: PostOpts) {
       const {width, height} = image.compressed || image
       logger.debug(`Uploading image`)
       const res = await uploadBlob(agent, path, 'image/jpeg')
+      if (isNative) {
+        safeDeleteAsync(path)
+      }
       images.push({
         image: res.data.blob,
         alt: image.altText ?? '',
@@ -171,6 +165,9 @@ export async function post(agent: BskyAgent, opts: PostOpts) {
             encoding,
           )
           thumb = thumbUploadRes.data.blob
+          if (isNative) {
+            safeDeleteAsync(opts.extLink.localThumb.path)
+          }
         }
       }
 
@@ -273,7 +270,7 @@ export async function post(agent: BskyAgent, opts: PostOpts) {
   return res
 }
 
-async function createThreadgate(
+export async function createThreadgate(
   agent: BskyAgent,
   postUri: string,
   threadgate: ThreadgateSetting[],
@@ -299,10 +296,17 @@ async function createThreadgate(
   }
 
   const postUrip = new AtUri(postUri)
-  await agent.api.app.bsky.feed.threadgate.create(
-    {repo: agent.session!.did, rkey: postUrip.rkey},
-    {post: postUri, createdAt: new Date().toISOString(), allow},
-  )
+  await agent.api.com.atproto.repo.putRecord({
+    repo: agent.session!.did,
+    collection: 'app.bsky.feed.threadgate',
+    rkey: postUrip.rkey,
+    record: {
+      $type: 'app.bsky.feed.threadgate',
+      post: postUri,
+      allow,
+      createdAt: new Date().toISOString(),
+    },
+  })
 }
 
 // helpers

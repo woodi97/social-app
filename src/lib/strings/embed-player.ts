@@ -1,5 +1,8 @@
 import {Dimensions} from 'react-native'
+
+import {isSafari} from 'lib/browser'
 import {isWeb} from 'platform/detection'
+
 const {height: SCREEN_HEIGHT} = Dimensions.get('window')
 
 const IFRAME_HOST = isWeb
@@ -21,6 +24,7 @@ export const embedPlayerSources = [
   'vimeo',
   'giphy',
   'tenor',
+  'flickr',
 ] as const
 
 export type EmbedPlayerSource = (typeof embedPlayerSources)[number]
@@ -40,6 +44,7 @@ export type EmbedPlayerType =
   | 'vimeo_video'
   | 'giphy_gif'
   | 'tenor_gif'
+  | 'flickr_album'
 
 export const externalEmbedLabels: Record<EmbedPlayerSource, string> = {
   youtube: 'YouTube',
@@ -51,6 +56,7 @@ export const externalEmbedLabels: Record<EmbedPlayerSource, string> = {
   spotify: 'Spotify',
   appleMusic: 'Apple Music',
   soundcloud: 'SoundCloud',
+  flickr: 'Flickr',
 }
 
 export interface EmbedPlayerParams {
@@ -60,6 +66,10 @@ export interface EmbedPlayerParams {
   source: EmbedPlayerSource
   metaUri?: string
   hideDetails?: boolean
+  dimensions?: {
+    height: number
+    width: number
+  }
 }
 
 const giphyRegex = /media(?:[0-4]\.giphy\.com|\.giphy\.com)/i
@@ -90,7 +100,8 @@ export function parseEmbedPlayerFromUrl(
   if (
     urlp.hostname === 'www.youtube.com' ||
     urlp.hostname === 'youtube.com' ||
-    urlp.hostname === 'm.youtube.com'
+    urlp.hostname === 'm.youtube.com' ||
+    urlp.hostname === 'music.youtube.com'
   ) {
     const [_, page, shortVideoId] = urlp.pathname.split('/')
     const videoId =
@@ -266,7 +277,7 @@ export function parseEmbedPlayerFromUrl(
           isGif: true,
           hideDetails: true,
           metaUri: `https://giphy.com/gifs/${gifId}`,
-          playerUri: `https://i.giphy.com/media/${gifId}/giphy.webp`,
+          playerUri: `https://i.giphy.com/media/${gifId}/200.webp`,
         }
       }
     }
@@ -287,7 +298,7 @@ export function parseEmbedPlayerFromUrl(
           isGif: true,
           hideDetails: true,
           metaUri: `https://giphy.com/gifs/${trackingOrId}`,
-          playerUri: `https://i.giphy.com/media/${trackingOrId}/giphy.webp`,
+          playerUri: `https://i.giphy.com/media/${trackingOrId}/200.webp`,
         }
       } else if (filename && gifFilenameRegex.test(filename)) {
         return {
@@ -296,7 +307,7 @@ export function parseEmbedPlayerFromUrl(
           isGif: true,
           hideDetails: true,
           metaUri: `https://giphy.com/gifs/${idOrFilename}`,
-          playerUri: `https://i.giphy.com/media/${idOrFilename}/giphy.webp`,
+          playerUri: `https://i.giphy.com/media/${idOrFilename}/200.webp`,
         }
       }
     }
@@ -315,7 +326,7 @@ export function parseEmbedPlayerFromUrl(
         isGif: true,
         hideDetails: true,
         metaUri: `https://giphy.com/gifs/${gifId}`,
-        playerUri: `https://i.giphy.com/media/${gifId}/giphy.webp`,
+        playerUri: `https://i.giphy.com/media/${gifId}/200.webp`,
       }
     } else if (mediaOrFilename) {
       const gifId = mediaOrFilename.split('.')[0]
@@ -327,27 +338,95 @@ export function parseEmbedPlayerFromUrl(
         metaUri: `https://giphy.com/gifs/${gifId}`,
         playerUri: `https://i.giphy.com/media/${
           mediaOrFilename.split('.')[0]
-        }/giphy.webp`,
+        }/200.webp`,
       }
     }
   }
 
-  if (urlp.hostname === 'tenor.com' || urlp.hostname === 'www.tenor.com') {
-    const [_, pathOrIntl, pathOrFilename, intlFilename] =
-      urlp.pathname.split('/')
-    const isIntl = pathOrFilename === 'view'
-    const filename = isIntl ? intlFilename : pathOrFilename
+  const tenorGif = parseTenorGif(urlp)
+  if (tenorGif.success) {
+    const {playerUri, dimensions} = tenorGif
 
-    if ((pathOrIntl === 'view' || pathOrFilename === 'view') && filename) {
-      const includesExt = filename.split('.').pop() === 'gif'
+    return {
+      type: 'tenor_gif',
+      source: 'tenor',
+      isGif: true,
+      hideDetails: true,
+      playerUri,
+      dimensions,
+    }
+  }
 
-      return {
-        type: 'tenor_gif',
-        source: 'tenor',
-        isGif: true,
-        hideDetails: true,
-        playerUri: `${url}${!includesExt ? '.gif' : ''}`,
+  // this is a standard flickr path! we can use the embedder for albums and groups, so validate the path
+  if (urlp.hostname === 'www.flickr.com' || urlp.hostname === 'flickr.com') {
+    let i = urlp.pathname.length - 1
+    while (i > 0 && urlp.pathname.charAt(i) === '/') {
+      --i
+    }
+
+    const path_components = urlp.pathname.slice(1, i + 1).split('/')
+    if (path_components.length === 4) {
+      // discard username - it's not relevant
+      const [photos, _, albums, id] = path_components
+      if (photos === 'photos' && albums === 'albums') {
+        // this at least has the shape of a valid photo-album URL!
+        return {
+          type: 'flickr_album',
+          source: 'flickr',
+          playerUri: `https://embedr.flickr.com/photosets/${id}`,
+        }
       }
+    }
+
+    if (path_components.length === 3) {
+      const [groups, id, pool] = path_components
+      if (groups === 'groups' && pool === 'pool') {
+        return {
+          type: 'flickr_album',
+          source: 'flickr',
+          playerUri: `https://embedr.flickr.com/groups/${id}`,
+        }
+      }
+    }
+    // not an album or a group pool, don't know what to do with this!
+    return undefined
+  }
+
+  // link shortened flickr path
+  if (urlp.hostname === 'flic.kr') {
+    const b58alph = '123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ'
+    let [_, type, idBase58Enc] = urlp.pathname.split('/')
+    let id = 0n
+    for (const char of idBase58Enc) {
+      const nextIdx = b58alph.indexOf(char)
+      if (nextIdx >= 0) {
+        id = id * 58n + BigInt(nextIdx)
+      } else {
+        // not b58 encoded, ergo not a valid link to embed
+        return undefined
+      }
+    }
+
+    switch (type) {
+      case 'go':
+        const formattedGroupId = `${id}`
+        return {
+          type: 'flickr_album',
+          source: 'flickr',
+          playerUri: `https://embedr.flickr.com/groups/${formattedGroupId.slice(
+            0,
+            -2,
+          )}@N${formattedGroupId.slice(-2)}`,
+        }
+      case 's':
+        return {
+          type: 'flickr_album',
+          source: 'flickr',
+          playerUri: `https://embedr.flickr.com/photosets/${id}`,
+        }
+      default:
+        // we don't know what this is so we can't embed it
+        return undefined
     }
   }
 }
@@ -413,5 +492,57 @@ export function getGiphyMetaUri(url: URL) {
     if (params && params.type === 'giphy_gif') {
       return params.metaUri
     }
+  }
+}
+
+export function parseTenorGif(urlp: URL):
+  | {success: false}
+  | {
+      success: true
+      playerUri: string
+      dimensions: {height: number; width: number}
+    } {
+  if (urlp.hostname !== 'media.tenor.com') {
+    return {success: false}
+  }
+
+  let [_, id, filename] = urlp.pathname.split('/')
+
+  if (!id || !filename) {
+    return {success: false}
+  }
+
+  if (!id.includes('AAAAC')) {
+    return {success: false}
+  }
+
+  const h = urlp.searchParams.get('hh')
+  const w = urlp.searchParams.get('ww')
+
+  if (!h || !w) {
+    return {success: false}
+  }
+
+  const dimensions = {
+    height: Number(h),
+    width: Number(w),
+  }
+
+  if (isWeb) {
+    if (isSafari) {
+      id = id.replace('AAAAC', 'AAAP1')
+      filename = filename.replace('.gif', '.mp4')
+    } else {
+      id = id.replace('AAAAC', 'AAAP3')
+      filename = filename.replace('.gif', '.webm')
+    }
+  } else {
+    id = id.replace('AAAAC', 'AAAAM')
+  }
+
+  return {
+    success: true,
+    playerUri: `https://t.gifs.bsky.app/${id}/${filename}`,
+    dimensions,
   }
 }

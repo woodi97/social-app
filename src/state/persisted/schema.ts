@@ -1,28 +1,53 @@
 import {z} from 'zod'
 
-import {deviceLocales} from '#/platform/detection'
+import {deviceLocales, prefersReducedMotion} from '#/platform/detection'
 
 const externalEmbedOptions = ['show', 'hide'] as const
 
-// only data needed for rendering account page
+/**
+ * A account persisted to storage. Stored in the `accounts[]` array. Contains
+ * base account info and access tokens.
+ */
 const accountSchema = z.object({
   service: z.string(),
   did: z.string(),
   handle: z.string(),
   email: z.string().optional(),
   emailConfirmed: z.boolean().optional(),
+  emailAuthFactor: z.boolean().optional(),
   refreshJwt: z.string().optional(), // optional because it can expire
   accessJwt: z.string().optional(), // optional because it can expire
-  deactivated: z.boolean().optional(),
+  signupQueued: z.boolean().optional(),
+  active: z.boolean().optional(), // optional for backwards compat
+  /**
+   * Known values: takendown, suspended, deactivated
+   * @see https://github.com/bluesky-social/atproto/blob/5441fbde9ed3b22463e91481ec80cb095643e141/lexicons/com/atproto/server/getSession.json
+   */
+  status: z.string().optional(),
+  pdsUrl: z.string().optional(),
 })
 export type PersistedAccount = z.infer<typeof accountSchema>
+
+/**
+ * The current account. Stored in the `currentAccount` field.
+ *
+ * In previous versions, this included tokens and other info. Now, it's used
+ * only to reference the `did` field, and all other fields are marked as
+ * optional. They should be considered deprecated and not used, but are kept
+ * here for backwards compat.
+ */
+const currentAccountSchema = accountSchema.extend({
+  service: z.string().optional(),
+  handle: z.string().optional(),
+})
+export type PersistedCurrentAccount = z.infer<typeof currentAccountSchema>
 
 export const schema = z.object({
   colorMode: z.enum(['system', 'light', 'dark']),
   darkTheme: z.enum(['dim', 'dark']).optional(),
   session: z.object({
     accounts: z.array(accountSchema),
-    currentAccount: accountSchema.optional(),
+    currentAccount: currentAccountSchema.optional(),
   }),
   reminders: z.object({
     lastEmailConfirm: z.string().optional(),
@@ -35,6 +60,7 @@ export const schema = z.object({
     appLanguage: z.string(),
   }),
   requireAltTextEnabled: z.boolean(), // should move to server
+  largeAltBadgeEnabled: z.boolean().optional(),
   externalEmbeds: z
     .object({
       giphy: z.enum(externalEmbedOptions).optional(),
@@ -46,9 +72,9 @@ export const schema = z.object({
       spotify: z.enum(externalEmbedOptions).optional(),
       appleMusic: z.enum(externalEmbedOptions).optional(),
       soundcloud: z.enum(externalEmbedOptions).optional(),
+      flickr: z.enum(externalEmbedOptions).optional(),
     })
     .optional(),
-  mutedThreads: z.array(z.string()), // should move to server
   invites: z.object({
     copiedInvites: z.array(z.string()),
   }),
@@ -60,6 +86,11 @@ export const schema = z.object({
   lastSelectedHomeFeed: z.string().optional(),
   pdsAddressHistory: z.array(z.string()).optional(),
   disableHaptics: z.boolean().optional(),
+  disableAutoplay: z.boolean().optional(),
+  kawaii: z.boolean().optional(),
+  hasCheckedForStarterPack: z.boolean().optional(),
+  /** @deprecated */
+  mutedThreads: z.array(z.string()),
 })
 export type Schema = z.infer<typeof schema>
 
@@ -83,6 +114,7 @@ export const defaults: Schema = {
     appLanguage: deviceLocales[0] || 'en',
   },
   requireAltTextEnabled: false,
+  largeAltBadgeEnabled: false,
   externalEmbeds: {},
   mutedThreads: [],
   invites: {
@@ -96,4 +128,7 @@ export const defaults: Schema = {
   lastSelectedHomeFeed: undefined,
   pdsAddressHistory: [],
   disableHaptics: false,
+  disableAutoplay: prefersReducedMotion,
+  kawaii: false,
+  hasCheckedForStarterPack: false,
 }

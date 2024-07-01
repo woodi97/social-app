@@ -14,14 +14,15 @@ import {useQueryClient} from '@tanstack/react-query'
 
 import {moderatePost_wrapped as moderatePost} from '#/lib/moderatePost_wrapped'
 import {POST_TOMBSTONE, Shadow, usePostShadow} from '#/state/cache/post-shadow'
-import {useModerationOpts} from '#/state/queries/preferences'
+import {useModerationOpts} from '#/state/preferences/moderation-opts'
 import {useComposerControls} from '#/state/shell/composer'
 import {MAX_POST_LINES} from 'lib/constants'
 import {usePalette} from 'lib/hooks/usePalette'
 import {makeProfileLink} from 'lib/routes/links'
 import {countLines} from 'lib/strings/helpers'
 import {colors, s} from 'lib/styles'
-import {RQKEY as RQKEY_URI} from 'state/queries/resolve-uri'
+import {precacheProfile} from 'state/queries/profile'
+import {AviFollowButton} from '#/view/com/posts/AviFollowButton'
 import {atoms as a} from '#/alf'
 import {ProfileHoverCard} from '#/components/ProfileHoverCard'
 import {RichText} from '#/components/RichText'
@@ -35,14 +36,17 @@ import {PostMeta} from '../util/PostMeta'
 import {Text} from '../util/text/Text'
 import {PreviewableUserAvatar} from '../util/UserAvatar'
 import {UserInfoText} from '../util/UserInfoText'
+import hairlineWidth = StyleSheet.hairlineWidth
 
 export function Post({
   post,
   showReplyLine,
+  hideTopBorder,
   style,
 }: {
   post: AppBskyFeedDefs.PostView
   showReplyLine?: boolean
+  hideTopBorder?: boolean
   style?: StyleProp<ViewStyle>
 }) {
   const moderationOpts = useModerationOpts()
@@ -80,6 +84,7 @@ export function Post({
         richText={richText}
         moderation={moderation}
         showReplyLine={showReplyLine}
+        hideTopBorder={hideTopBorder}
         style={style}
       />
     )
@@ -93,6 +98,7 @@ function PostInner({
   richText,
   moderation,
   showReplyLine,
+  hideTopBorder,
   style,
 }: {
   post: Shadow<AppBskyFeedDefs.PostView>
@@ -100,6 +106,7 @@ function PostInner({
   richText: RichTextAPI
   moderation: ModerationDecision
   showReplyLine?: boolean
+  hideTopBorder?: boolean
   style?: StyleProp<ViewStyle>
 }) {
   const queryClient = useQueryClient()
@@ -135,25 +142,30 @@ function PostInner({
   }, [setLimitLines])
 
   const onBeforePress = React.useCallback(() => {
-    queryClient.setQueryData(RQKEY_URI(post.author.handle), post.author.did)
-  }, [queryClient, post.author.handle, post.author.did])
+    precacheProfile(queryClient, post.author)
+  }, [queryClient, post.author])
 
   return (
     <Link
       href={itemHref}
-      style={[styles.outer, pal.border, style]}
+      style={[
+        styles.outer,
+        pal.border,
+        !hideTopBorder && {borderTopWidth: hairlineWidth},
+        style,
+      ]}
       onBeforePress={onBeforePress}>
       {showReplyLine && <View style={styles.replyLine} />}
       <View style={styles.layout}>
         <View style={styles.layoutAvi}>
-          <PreviewableUserAvatar
-            size={52}
-            did={post.author.did}
-            handle={post.author.handle}
-            avatar={post.author.avatar}
-            moderation={moderation.ui('avatar')}
-            type={post.author.associated?.labeler ? 'labeler' : 'user'}
-          />
+          <AviFollowButton author={post.author} moderation={moderation}>
+            <PreviewableUserAvatar
+              size={52}
+              profile={post.author}
+              moderation={moderation.ui('avatar')}
+              type={post.author.associated?.labeler ? 'labeler' : 'user'}
+            />
+          </AviFollowButton>
         </View>
         <View style={styles.layoutContent}>
           <PostMeta
@@ -241,15 +253,14 @@ const styles = StyleSheet.create({
     paddingRight: 15,
     paddingBottom: 5,
     paddingLeft: 10,
-    borderTopWidth: 1,
     // @ts-ignore web only -prf
     cursor: 'pointer',
   },
   layout: {
     flexDirection: 'row',
+    gap: 10,
   },
   layoutAvi: {
-    width: 70,
     paddingLeft: 8,
   },
   layoutContent: {

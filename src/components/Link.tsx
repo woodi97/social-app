@@ -3,14 +3,17 @@ import {GestureResponderEvent} from 'react-native'
 import {sanitizeUrl} from '@braintree/sanitize-url'
 import {StackActions, useLinkProps} from '@react-navigation/native'
 
+import {BSKY_DOWNLOAD_URL} from '#/lib/constants'
 import {AllNavigatorParams} from '#/lib/routes/types'
 import {shareUrl} from '#/lib/sharing'
 import {
   convertBskyAppUrlIfNeeded,
+  isBskyDownloadUrl,
   isExternalUrl,
   linkRequiresWarning,
 } from '#/lib/strings/url-helpers'
-import {isNative, isWeb} from '#/platform/detection'
+import {isNative} from '#/platform/detection'
+import {shouldClickOpenNewTab} from '#/platform/urls'
 import {useModalControls} from '#/state/modals'
 import {useOpenLink} from '#/state/preferences/in-app-browser'
 import {useNavigationDeduped} from 'lib/hooks/useNavigationDeduped'
@@ -114,18 +117,11 @@ export function useLink({
         if (isExternal) {
           openLink(href)
         } else {
-          /**
-           * A `GestureResponderEvent`, but cast to `any` to avoid using a bunch
-           * of @ts-ignore below.
-           */
-          const event = e as any
-          const isMiddleClick = isWeb && event.button === 1
-          const isMetaKey =
-            isWeb &&
-            (event.metaKey || event.altKey || event.ctrlKey || event.shiftKey)
-          const shouldOpenInNewTab = isMetaKey || isMiddleClick
+          const shouldOpenInNewTab = shouldClickOpenNewTab(e)
 
-          if (
+          if (isBskyDownloadUrl(href)) {
+            shareUrl(BSKY_DOWNLOAD_URL)
+          } else if (
             shouldOpenInNewTab ||
             href.startsWith('http') ||
             href.startsWith('mailto')

@@ -1,26 +1,28 @@
 import * as React from 'react'
 import {
   LayoutChangeEvent,
+  NativeScrollEvent,
   ScrollView,
   StyleSheet,
   View,
-  NativeScrollEvent,
 } from 'react-native'
 import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
+  AnimatedRef,
   runOnJS,
   runOnUI,
   scrollTo,
-  useAnimatedRef,
-  AnimatedRef,
   SharedValue,
+  useAnimatedRef,
+  useAnimatedStyle,
+  useSharedValue,
 } from 'react-native-reanimated'
-import {Pager, PagerRef, RenderTabBarFnProps} from 'view/com/pager/Pager'
-import {TabBar} from './TabBar'
+
 import {useNonReactiveCallback} from '#/lib/hooks/useNonReactiveCallback'
-import {ListMethods} from '../util/List'
 import {ScrollProvider} from '#/lib/ScrollContext'
+import {isIOS} from 'platform/detection'
+import {Pager, PagerRef, RenderTabBarFnProps} from 'view/com/pager/Pager'
+import {ListMethods} from '../util/List'
+import {TabBar} from './TabBar'
 
 export interface PagerWithHeaderChildParams {
   headerHeight: number
@@ -65,13 +67,13 @@ export const PagerWithHeader = React.forwardRef<PagerRef, PagerWithHeaderProps>(
       const height = evt.nativeEvent.layout.height
       if (height > 0) {
         // The rounding is necessary to prevent jumps on iOS
-        setTabBarHeight(Math.round(height))
+        setTabBarHeight(Math.round(height * 2) / 2)
       }
     })
     const onHeaderOnlyLayout = useNonReactiveCallback((height: number) => {
       if (height > 0) {
         // The rounding is necessary to prevent jumps on iOS
-        setHeaderOnlyHeight(Math.round(height))
+        setHeaderOnlyHeight(Math.round(height * 2) / 2)
       }
     })
 
@@ -107,7 +109,7 @@ export const PagerWithHeader = React.forwardRef<PagerRef, PagerWithHeaderProps>(
       ],
     )
 
-    const scrollRefs = useSharedValue<AnimatedRef<any>[]>([])
+    const scrollRefs = useSharedValue<Array<AnimatedRef<any> | null>>([])
     const registerRef = React.useCallback(
       (scrollRef: AnimatedRef<any> | null, atIndex: number) => {
         scrollRefs.modify(refs => {
@@ -128,8 +130,9 @@ export const PagerWithHeader = React.forwardRef<PagerRef, PagerWithHeaderProps>(
         lastForcedScrollY.value = forcedScrollY
         const refs = scrollRefs.value
         for (let i = 0; i < refs.length; i++) {
-          if (i !== currentPage && refs[i] != null) {
-            scrollTo(refs[i], 0, forcedScrollY, false)
+          const scollRef = refs[i]
+          if (i !== currentPage && scollRef != null) {
+            scrollTo(scollRef, 0, forcedScrollY, false)
           }
         }
       }
@@ -236,9 +239,12 @@ let PagerTabBar = ({
   const headerRef = React.useRef(null)
   return (
     <Animated.View
-      pointerEvents="box-none"
+      pointerEvents={isIOS ? 'auto' : 'box-none'}
       style={[styles.tabBarMobile, headerTransform]}>
-      <View ref={headerRef} pointerEvents="box-none" collapsable={false}>
+      <View
+        ref={headerRef}
+        pointerEvents={isIOS ? 'auto' : 'box-none'}
+        collapsable={false}>
         {renderHeader?.()}
         {
           // It wouldn't be enough to place `onLayout` on the parent node because

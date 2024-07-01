@@ -1,6 +1,7 @@
 import React from 'react'
 import {View} from 'react-native'
-import {LayoutAnimationConfig} from 'react-native-reanimated'
+import Animated, {FadeIn, LayoutAnimationConfig} from 'react-native-reanimated'
+import {AppBskyGraphStarterpack} from '@atproto/api'
 import {msg, Trans} from '@lingui/macro'
 import {useLingui} from '@lingui/react'
 
@@ -8,8 +9,11 @@ import {useAnalytics} from '#/lib/analytics/analytics'
 import {FEEDBACK_FORM_URL} from '#/lib/constants'
 import {logEvent} from '#/lib/statsig/statsig'
 import {createFullHandle} from '#/lib/strings/handles'
+import {logger} from '#/logger'
 import {useServiceQuery} from '#/state/queries/service'
-import {getAgent} from '#/state/session'
+import {useAgent} from '#/state/session'
+import {useStarterPackQuery} from 'state/queries/starter-packs'
+import {useActiveStarterPack} from 'state/shell/starter-pack'
 import {LoggedOutLayout} from '#/view/com/util/layouts/LoggedOutLayout'
 import {
   initialState,
@@ -25,6 +29,7 @@ import {atoms as a, useBreakpoints, useTheme} from '#/alf'
 import {AppLanguageDropdown} from '#/components/AppLanguageDropdown'
 import {Button, ButtonText} from '#/components/Button'
 import {Divider} from '#/components/Divider'
+import {LinearGradientBackground} from '#/components/LinearGradientBackground'
 import {InlineLinkText} from '#/components/Link'
 import {Text} from '#/components/Typography'
 
@@ -35,6 +40,20 @@ export function Signup({onPressBack}: {onPressBack: () => void}) {
   const [state, dispatch] = React.useReducer(reducer, initialState)
   const submit = useSubmitSignup({state, dispatch})
   const {gtMobile} = useBreakpoints()
+  const agent = useAgent()
+
+  const activeStarterPack = useActiveStarterPack()
+  const {
+    data: starterPack,
+    isFetching: isFetchingStarterPack,
+    isError: isErrorStarterPack,
+  } = useStarterPackQuery({
+    uri: activeStarterPack?.uri,
+  })
+
+  const [isFetchedAtMount] = React.useState(starterPack != null)
+  const showStarterPackCard =
+    activeStarterPack?.uri && !isFetchingStarterPack && starterPack
 
   const {
     data: serviceInfo,
@@ -75,7 +94,7 @@ export function Signup({onPressBack}: {onPressBack: () => void}) {
       try {
         dispatch({type: 'setIsLoading', value: true})
 
-        const res = await getAgent().resolveHandle({
+        const res = await agent.resolveHandle({
           handle: createFullHandle(state.handle, state.userDomain),
         })
 
@@ -93,6 +112,12 @@ export function Signup({onPressBack}: {onPressBack: () => void}) {
       }
     }
 
+    logEvent('signup:nextPressed', {
+      activeStep: state.activeStep,
+      phoneVerificationRequired:
+        state.serviceDescription?.phoneVerificationRequired,
+    })
+
     // phoneVerificationRequired is actually whether a captcha is required
     if (
       state.activeStep === SignupStep.HANDLE &&
@@ -101,11 +126,7 @@ export function Signup({onPressBack}: {onPressBack: () => void}) {
       submit()
       return
     }
-
     dispatch({type: 'next'})
-    logEvent('signup:nextPressed', {
-      activeStep: state.activeStep,
-    })
   }, [
     _,
     state.activeStep,
@@ -113,15 +134,26 @@ export function Signup({onPressBack}: {onPressBack: () => void}) {
     state.serviceDescription?.phoneVerificationRequired,
     state.userDomain,
     submit,
+    agent,
   ])
 
   const onBackPress = React.useCallback(() => {
     if (state.activeStep !== SignupStep.INFO) {
+      if (state.activeStep === SignupStep.CAPTCHA) {
+        logger.error('Signup Flow Error', {
+          errorMessage:
+            'User went back from captcha step. Possibly encountered an error.',
+          registrationHandle: state.handle,
+        })
+      }
       dispatch({type: 'prev'})
     } else {
       onPressBack()
     }
-  }, [onPressBack, state.activeStep])
+    logEvent('signup:backPressed', {
+      activeStep: state.activeStep,
+    })
+  }, [onPressBack, state.activeStep, state.handle])
 
   return (
     <SignupContext.Provider value={{state, dispatch}}>
@@ -131,6 +163,30 @@ export function Signup({onPressBack}: {onPressBack: () => void}) {
         description={_(msg`We're so excited to have you join us!`)}
         scrollable>
         <View testID="createAccount" style={a.flex_1}>
+          {showStarterPackCard &&
+          AppBskyGraphStarterpack.isRecord(starterPack.record) ? (
+            <Animated.View entering={!isFetchedAtMount ? FadeIn : undefined}>
+              <LinearGradientBackground
+                style={[a.mx_lg, a.p_lg, a.gap_sm, a.rounded_sm]}>
+                <Text style={[a.font_bold, a.text_xl, {color: 'white'}]}>
+                  {starterPack.record.name}
+                </Text>
+                <Text style={[{color: 'white'}]}>
+                  {starterPack.feeds?.length ? (
+                    <Trans>
+                      You'll follow the suggested users and feeds once you
+                      finish creating your account!
+                    </Trans>
+                  ) : (
+                    <Trans>
+                      You'll follow the suggested users once you finish creating
+                      your account!
+                    </Trans>
+                  )}
+                </Text>
+              </LinearGradientBackground>
+            </Animated.View>
+          ) : null}
           <View
             style={[
               a.flex_1,
@@ -140,11 +196,13 @@ export function Signup({onPressBack}: {onPressBack: () => void}) {
             ]}>
             <View style={[a.gap_sm, a.pb_3xl]}>
               <Text style={[a.font_semibold, t.atoms.text_contrast_medium]}>
-                <Trans>Step</Trans> {state.activeStep + 1} <Trans>of</Trans>{' '}
-                {state.serviceDescription &&
-                !state.serviceDescription.phoneVerificationRequired
-                  ? '2'
-                  : '3'}
+                <Trans>
+                  Step {state.activeStep + 1} of{' '}
+                  {state.serviceDescription &&
+                  !state.serviceDescription.phoneVerificationRequired
+                    ? '2'
+                    : '3'}
+                </Trans>
               </Text>
               <Text style={[a.text_3xl, a.font_bold]}>
                 {state.activeStep === SignupStep.INFO ? (
@@ -160,7 +218,11 @@ export function Signup({onPressBack}: {onPressBack: () => void}) {
             <View style={[a.pb_3xl]}>
               <LayoutAnimationConfig skipEntering skipExiting>
                 {state.activeStep === SignupStep.INFO ? (
-                  <StepInfo />
+                  <StepInfo
+                    isLoadingStarterPack={
+                      isFetchingStarterPack && !isErrorStarterPack
+                    }
+                  />
                 ) : state.activeStep === SignupStep.HANDLE ? (
                   <StepHandle />
                 ) : (

@@ -10,22 +10,18 @@ import {
 } from 'react-native'
 import {Image as RNImage} from 'react-native-image-crop-picker'
 import {LinearGradient} from 'expo-linear-gradient'
-import {
-  AppBskyGraphDefs,
-  AppBskyRichtextFacet,
-  RichText as RichTextAPI,
-} from '@atproto/api'
+import {AppBskyGraphDefs, RichText as RichTextAPI} from '@atproto/api'
 import {msg, Trans} from '@lingui/macro'
 import {useLingui} from '@lingui/react'
 
 import {richTextToString} from '#/lib/strings/rich-text-helpers'
-import {shortenLinks} from '#/lib/strings/rich-text-manip'
+import {shortenLinks, stripInvalidMentions} from '#/lib/strings/rich-text-manip'
 import {useModalControls} from '#/state/modals'
 import {
   useListCreateMutation,
   useListMetadataMutation,
 } from '#/state/queries/list'
-import {getAgent} from '#/state/session'
+import {useAgent} from '#/state/session'
 import {useAnalytics} from 'lib/analytics/analytics'
 import {usePalette} from 'lib/hooks/usePalette'
 import {useWebMediaQueries} from 'lib/hooks/useWebMediaQueries'
@@ -62,6 +58,7 @@ export function Component({
   const {_} = useLingui()
   const listCreateMutation = useListCreateMutation()
   const listMetadataMutation = useListMetadataMutation()
+  const agent = useAgent()
 
   const activePurpose = useMemo(() => {
     if (list?.purpose) {
@@ -156,19 +153,9 @@ export function Component({
         {cleanNewlines: true},
       )
 
-      await richText.detectFacets(getAgent())
+      await richText.detectFacets(agent)
       richText = shortenLinks(richText)
-
-      // filter out any mention facets that didn't map to a user
-      richText.facets = richText.facets?.filter(facet => {
-        const mention = facet.features.find(feature =>
-          AppBskyRichtextFacet.isMention(feature),
-        )
-        if (mention && !mention.did) {
-          return false
-        }
-        return true
-      })
+      richText = stripInvalidMentions(richText)
 
       if (list) {
         await listMetadataMutation.mutateAsync({
@@ -228,6 +215,7 @@ export function Component({
     listMetadataMutation,
     listCreateMutation,
     _,
+    agent,
   ])
 
   return (

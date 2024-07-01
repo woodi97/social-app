@@ -12,7 +12,7 @@ import {useQueryClient} from '@tanstack/react-query'
 import {useModerationCauseDescription} from '#/lib/moderation/useModerationCauseDescription'
 import {useProfileShadow} from '#/state/cache/profile-shadow'
 import {Shadow} from '#/state/cache/types'
-import {useModerationOpts} from '#/state/queries/preferences'
+import {useModerationOpts} from '#/state/preferences/moderation-opts'
 import {useSession} from '#/state/session'
 import {usePalette} from 'lib/hooks/usePalette'
 import {getModerationCauseKey, isJustAMute} from 'lib/moderation'
@@ -20,12 +20,12 @@ import {makeProfileLink} from 'lib/routes/links'
 import {sanitizeDisplayName} from 'lib/strings/display-names'
 import {sanitizeHandle} from 'lib/strings/handles'
 import {s} from 'lib/styles'
-import {profileBasicQueryKey as RQKEY_PROFILE_BASIC} from 'state/queries/profile'
-import {RQKEY as RQKEY_URI} from 'state/queries/resolve-uri'
+import {precacheProfile} from 'state/queries/profile'
 import {Link} from '../util/Link'
 import {Text} from '../util/text/Text'
 import {PreviewableUserAvatar} from '../util/UserAvatar'
 import {FollowButton} from './FollowButton'
+import hairlineWidth = StyleSheet.hairlineWidth
 
 export function ProfileCard({
   testID,
@@ -58,9 +58,7 @@ export function ProfileCard({
 
   const onBeforePress = React.useCallback(() => {
     onPress?.()
-
-    queryClient.setQueryData(RQKEY_URI(profile.handle), profile.did)
-    queryClient.setQueryData(RQKEY_PROFILE_BASIC(profile.did), profile)
+    precacheProfile(queryClient, profile)
   }, [onPress, profile, queryClient])
 
   if (!moderationOpts) {
@@ -91,9 +89,7 @@ export function ProfileCard({
         <View style={styles.layoutAvi}>
           <PreviewableUserAvatar
             size={40}
-            did={profile.did}
-            handle={profile.handle}
-            avatar={profile.avatar}
+            profile={profile}
             moderation={moderation.ui('avatar')}
             type={isLabeler ? 'labeler' : 'user'}
           />
@@ -238,9 +234,7 @@ function FollowersList({
           <View style={[styles.followedByAvi, pal.view]}>
             <PreviewableUserAvatar
               size={32}
-              did={f.did}
-              handle={f.handle}
-              avatar={f.avatar}
+              profile={f}
               moderation={mod.ui('avatar')}
               type={f.associated?.labeler ? 'labeler' : 'user'}
             />
@@ -257,12 +251,14 @@ export function ProfileCardWithFollowBtn({
   noBorder,
   followers,
   onPress,
+  logContext = 'ProfileCard',
 }: {
   profile: AppBskyActorDefs.ProfileViewBasic
   noBg?: boolean
   noBorder?: boolean
   followers?: AppBskyActorDefs.ProfileView[] | undefined
   onPress?: () => void
+  logContext?: 'ProfileCard' | 'StarterPackProfilesList'
 }) {
   const {currentAccount} = useSession()
   const isMe = profile.did === currentAccount?.did
@@ -277,7 +273,7 @@ export function ProfileCardWithFollowBtn({
         isMe
           ? undefined
           : profileShadow => (
-              <FollowButton profile={profileShadow} logContext="ProfileCard" />
+              <FollowButton profile={profileShadow} logContext={logContext} />
             )
       }
       onPress={onPress}
@@ -287,7 +283,7 @@ export function ProfileCardWithFollowBtn({
 
 const styles = StyleSheet.create({
   outer: {
-    borderTopWidth: 1,
+    borderTopWidth: hairlineWidth,
     paddingHorizontal: 6,
     paddingVertical: 4,
   },
@@ -320,6 +316,7 @@ const styles = StyleSheet.create({
     paddingRight: 10,
   },
   details: {
+    justifyContent: 'center',
     paddingLeft: 54,
     paddingRight: 10,
     paddingBottom: 10,
@@ -334,6 +331,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     paddingHorizontal: 6,
     paddingVertical: 2,
+    justifyContent: 'center',
   },
   btn: {
     paddingVertical: 7,
@@ -344,7 +342,6 @@ const styles = StyleSheet.create({
 
   followedBy: {
     flexDirection: 'row',
-    alignItems: 'center',
     paddingLeft: 54,
     paddingRight: 20,
     marginBottom: 10,
